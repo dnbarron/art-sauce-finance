@@ -1,0 +1,131 @@
+---
+title: "art-sauce Finance Report"
+author: "David Barron"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+---
+
+```{r setup, include=TRUE, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, error=TRUE, cache=FALSE)
+library(knitr)
+library(kableExtra)
+options(knitr.kable.NA = '')
+
+# Format money output
+inline_hook <- function(x){
+  format(x, nsmall = 2, scientific = FALSE, big.mark = ",")
+}
+
+knit_hooks$set(inline = inline_hook)
+
+```
+
+```{r intro}
+library(tidyverse)
+library(googlesheets4)
+
+
+```
+
+```{r readdata}
+ as_dta <- read_sheet("https://docs.google.com/spreadsheets/d/1eKrWtCjT86qElyHUVfDRuESNdZzGMvXR25UdAMDiTcY/edit?usp=sharing",
+   sheet = "Accoounts 2024 January - December")
+
+as_dta <- as_dta %>%
+  select(Date, Description, Expenditure = `Debit Amount`, Income = `Credit Amount`, Balance, Category)
+
+nrows <- dim(as_dta)[1]
+```
+
+```{r transformdata}
+
+sum_dta <- function(dta){
+  dta %>%
+          mutate(Date = lubridate::ymd(Date),
+                 Month = lubridate::month(Date)) %>%
+        group_by(Month) %>%
+        summarise(
+          Expend = sum(Expenditure, na.rm = TRUE),
+          Inc = sum(Income, na.rm = TRUE)
+        )  
+}
+ 
+as_sum <- sum_dta(as_dta)
+
+calc.cumsum <- function(dta){
+  dta %>%
+    mutate(
+          Income = cumsum(Inc),
+          Expenditure = cumsum(Expend)
+        ) %>%
+        select(Month, Income, Expenditure)
+}
+
+as_cumsum <- calc.cumsum(as_sum)
+
+num.months <- dim(as_cumsum)[1]
+
+
+calc.long <- function(dta) {
+  dta %>% pivot_longer(
+              cols = Income:Expenditure,
+              names_to = "Type",
+              values_to = "Amount"
+  ) 
+}
+
+as_long <- calc.long(as_cumsum)
+
+calc.sum <- function(dta){
+  dta %>%
+  group_by(Category) %>%
+  summarise(Income = sum(Income, na.rm = TRUE),
+            Expenditure = sum(Expenditure, na.rm = TRUE))
+}
+
+sum_tab <- calc.sum(as_dta)
+
+total.income <- as.numeric(as_cumsum[num.months, 2])
+
+total.expenditure <- as.numeric(as_cumsum[num.months, 3]) 
+
+
+```
+
+```{r plot}
+
+labels <- month.abb[1:num.months]
+
+as_long  %>%
+  ggplot(aes(x = Month, y = Amount, colour = Type)) + 
+          geom_point() +
+          geom_line() +
+          scale_x_continuous(
+            breaks = 1:12,
+            minor_breaks = NULL,
+            label =  month.abb
+          ) + 
+  scale_y_continuous(label = scales::label_dollar(prefix="£")) +
+  theme_light() 
+
+```
+
+
+## Income and Expenditure
+
+- Total income since 1 January 2024 is £`r total.income`
+
+- Total expenditure since 1 January 2024 is £`r total.expenditure`
+
+- **The current year's `r ifelse(total.income - total.expenditure > 0, "surplus", "deficit")` is £`r total.income - total.expenditure`**
+
+- Current account balance £`r as.numeric(as_dta[nrows,5]) `
+
+
+```{r summary}
+
+sum_tab %>% kbl() %>%
+  kable_classic(full_width = FALSE)
+
+```
